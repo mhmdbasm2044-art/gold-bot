@@ -1,72 +1,98 @@
 from flask import Flask
 import threading, time, requests, os
-from datetime import datetime
 
 app = Flask(__name__)
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# اعدادات احترافية
-SUPPORT = 4100
-RESISTANCE = 4200
-BREAKOUT_BUFFER = 8
-last_price = 0
-above_count = 0
+# الارقام
+GOLD_SUP = 4100
+GOLD_RES = 4200
+BTC_SUP = 108000
+BTC_RES = 112000
 
-def send(msg):
+wg_res = False
+wg_sup = False
+wb_res = False
+wb_sup = False
+g_up = 0
+g_down = 0
+b_up = 0
+b_down = 0
+
+def send(m):
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {"chat_id": CHAT_ID, "text": msg}
-        requests.post(url, data=data, timeout=10)
-    except Exception as e:
-        print(e)
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": m}, timeout=15)
+    except: pass
 
-def get_gold_price():
+def prices():
     try:
-        r = requests.get("https://api.gold-api.com/price/XAU", timeout=10).json()
-        return float(r.get('price', 0))
-    except:
-        return 0
+        g = float(requests.get("https://api.gold-api.com/price/XAU", timeout=10).json().get('price',0))
+    except: g=0
+    try:
+        b = float(requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=10).json()['bitcoin']['usd'])
+    except: b=0
+    return g,b
 
-def check_gold():
-    global last_price, above_count
+def loop():
+    global wg_res, wg_sup, wb_res, wb_sup, g_up, g_down, b_up, b_down
     while True:
-        price = get_gold_price()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        print(f"[{now}] Gold: {price}")
+        gold, btc = prices()
+        print(f"Gold {gold} | BTC {btc}")
 
-        if price == 0:
-            time.sleep(60)
-            continue
-
-        # 1- قرب المقاومة
-        if RESISTANCE-15 < price < RESISTANCE:
-            if last_price < RESISTANCE-15:
-                send(f"⚠️ الذهب عند المقاومة\nالسعر: ${price}\nالمقاومة: {RESISTANCE}$ قوية\nالقرار: لا تشتري - انتظر كسر")
-
-        # 2- كسر مقاومة حقيقي - شراء مو بيع
-        elif price > RESISTANCE + BREAKOUT_BUFFER:
-            above_count += 1
-            if above_count >= 2:
-                send(f"🚀 كسر مقاومة مؤكد!\nكسر {RESISTANCE}$ ووصل ${price}\nالقرار: شراء - الهدف 4250$ ثم 4300$\nستوب: {RESISTANCE}$")
-                above_count = 0
+        # === ذهب مقاومة ===
+        if GOLD_RES-20 < gold < GOLD_RES and not wg_res:
+            send(f"⏳ ذهب ${gold}\nقرب مقاومة {GOLD_RES}$\nانتظر لا تدخل هسه.. اذا كسر انطيك اشارة شراء")
+            wg_res=True
+        if gold > GOLD_RES+8:
+            g_up+=1
+            if g_up>=2 and wg_res:
+                send(f"🚀 ذهب كسر المقاومة!\nكان {GOLD_RES}$ هسه ${gold}\nاشتري هسه ✅\nهدف 4250$ - 4300$")
+                wg_res=False; g_up=0
         else:
-            above_count = 0
+            if gold < GOLD_RES: g_up=0
 
-        # 3- عند الدعم - شراء
-        if SUPPORT-10 < price < SUPPORT+15 and last_price > SUPPORT+20:
-            send(f"🟢 الذهب عند الدعم\nالسعر: ${price}\nالدعم {SUPPORT}$ صمد اسبوع\nالقرار: شراء - هدف {RESISTANCE}$")
+        # === ذهب دعم ===
+        if GOLD_SUP-15 < gold < GOLD_SUP+15 and not wg_sup:
+            send(f"⏳ ذهب ${gold}\nقرب دعم {GOLD_SUP}$\nانتظر.. اذا ثبت راح اكلك اشتري")
+            wg_sup=True
+        if gold < GOLD_SUP-8:
+            g_down+=1
+            if g_down>=2 and wg_sup:
+                send(f"🔴 ذهب كسر الدعم!\nنزل جوة {GOLD_SUP}$ وصل ${gold}\nبيع هسه ❌")
+                wg_sup=False; g_down=0
+        else:
+            if gold > GOLD_SUP: g_down=0
 
-        last_price = price
-        time.sleep(300)
+        # === بتكوين مقاومة ===
+        if BTC_RES-1500 < btc < BTC_RES and not wb_res:
+            send(f"⏳ بتكوين ${btc}\nقرب مقاومة {BTC_RES}$\nانتظر لا تدخل")
+            wb_res=True
+        if btc > BTC_RES+500:
+            b_up+=1
+            if b_up>=2 and wb_res:
+                send(f"🚀 بتكوين كسر المقاومة!\nكان {BTC_RES}$ هسه ${btc}\nاشتري هسه ✅\nهدف 115k$")
+                wb_res=False; b_up=0
+        else:
+            if btc < BTC_RES: b_up=0
+
+        # === بتكوين دعم ===
+        if BTC_SUP-1000 < btc < BTC_SUP+1000 and not wb_sup:
+            send(f"⏳ بتكوين ${btc}\nقرب دعم {BTC_SUP}$\nانتظر..")
+            wb_sup=True
+        if btc < BTC_SUP-500:
+            b_down+=1
+            if b_down>=2 and wb_sup:
+                send(f"🔴 بتكوين كسر الدعم!\nنزل جوة {BTC_SUP}$ وصل ${btc}\nبيع ❌")
+                wb_sup=False; b_down=0
+        else:
+            if btc > BTC_SUP: b_down=0
+
+        time.sleep(300) # 5 دقايق
 
 @app.route("/")
 def home():
-    price = get_gold_price()
-    return f"✅ Gold Bot Pro شغال - السعر هسه ${price} - دعم {SUPPORT} مقاومة {RESISTANCE}"
+    g,b = prices()
+    return f"✅ شغال كل 5 دقايق<br>Gold: ${g} (دعم {GOLD_SUP} مقاومة {GOLD_RES})<br>BTC: ${b} (دعم {BTC_SUP} مقاومة {BTC_RES})"
 
-threading.Thread(target=check_gold, daemon=True).start()
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+threading.Thread(target=loop, daemon=True).start()
