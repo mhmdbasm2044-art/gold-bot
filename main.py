@@ -1,92 +1,125 @@
-import requests, threading, time, os
-from flask import Flask
-from datetime import datetime
+import requests, time, os, datetime
+import yfinance as yf
+import pandas as pd
+import pytz
 
-app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-gold_hist = []
-btc_hist = []
-last_min = -1
+TZ_BAGHDAD = pytz.timezone('Asia/Baghdad')
 
 def send(msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=15)
+        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={msg}", timeout=10)
     except: pass
 
-def rsi(prices):
-    if len(prices) < 15: return 50
-    up = sum(max(0, prices[i]-prices[i-1]) for i in range(-14,0))
-    down = sum(max(0, prices[i-1]-prices[i]) for i in range(-14,0))
-    if down==0: return 85
-    return 100-(100/(1+(up/14)/(down/14)))
+def get_data_30m(symbol):
+    try:
+        df = yf.download(symbol, period="2d", interval="30m", progress=False, auto_adjust=True)
+        if len(df) < 30: return None, None, None
+        close = df['Close']
+        if isinstance(close, pd.DataFrame): close = close.iloc[:,0]
+        delta = close.diff()
+        gain = delta.where(delta>0,0).rolling(14).mean()
+        loss = -delta.where(delta<0,0).rolling(14).mean()
+        rs = gain/loss
+        rsi = 100 - (100/(1+rs))
+        last_rsi = float(rsi.iloc[-1])
+        last_price = float(close.iloc[-1])
+        prev_price = float(close.iloc[-2])
+        ch = ((last_price-prev_price)/prev_price)*100
+        return last_price, last_rsi, ch
+    except:
+        return None, None, None
 
-def job():
-    global last_min
-    while True:
-        now = datetime.now()
-        # كل 30 دقيقة: 00 و 30
-        if now.minute % 30 == 0 and now.minute!= last_min:
-            last_min = now.minute
-            try:
-                try: gold = float(requests.get("https://api.gold-api.com/price/XAU", timeout=10).json()['price'])
-                except: gold = gold_hist[-1] if gold_hist else 4195
-                try: btc = float(requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=10).json()['bitcoin']['usd'])
-                except: btc = btc_hist[-1] if btc_hist else 82000
+def get_daily_levels():
+    try:
+        df = yf.download("GC=F", period="1mo", interval="1h", progress=False, auto_adjust=True)
+        if len(df) < 50: return None
+        close = df['Close']; high = df['High']; low = df['Low']
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:,0]; high = high.iloc[:,0]; low = low.iloc[:,0]
 
-                gold_hist.append(gold); btc_hist.append(btc)
-                if len(gold_hist)>200: gold_hist.pop(0)
-                if len(btc_hist)>200: btc_hist.pop(0)
-                if len(gold_hist) < 16: time.sleep(60); continue
+        levels = []
+        for i in range(2, len(df)-2):
+            if high.iloc[i] > high.iloc[i-1] and high.iloc[i] > high.iloc[i-2] and high.iloc[i] > high.iloc[i+1] and high.iloc[i] > high.iloc[i+2]:
+                levels.append(float(high.iloc[i]))
+            if low.iloc[i] < low.iloc[i-1] and low.iloc[i] < low.iloc[i-2] and low.iloc[i] < low.iloc[i+1] and low.iloc[i] < low.iloc[i+2]:
+                levels.append(float(low.iloc[i]))
 
-                g_rsi = rsi(gold_hist)
-                b_rsi = rsi(btc_hist)
-                g_change = (gold_hist[-1]-gold_hist[-2])/gold_hist[-2]*100 if len(gold_hist)>=2 else 0
-                b_change = (btc_hist[-1]-btc_hist[-2])/btc_hist[-2]*100 if len(btc_hist)>=2 else 0
+        daily = yf.download("GC=F", period="5d", interval="1d", progress=False, auto_adjust=True)
+        d_high = float(daily['High'].iloc[-1]); d_low = float(daily['Low'].iloc[-1]); d_close = float(daily['Close'].iloc[-1])
+        levels.extend([d_high, d_low, d_close, daily['High'].iloc[-2], daily['Low'].iloc[-2]])
 
-                # ===== ذهب =====
-                g_msg = f"⏰ {now.strftime('%H:%M')} | 🥇 ذهب 30m\n💰 ${gold:.2f} ({g_change:+.2f}%)\n📊 RSI {g_rsi:.0f}"
-                if g_rsi <= 22:
-                    g_msg += f"\n\n🔥🔥 شراء نادر جدا\n⛔ وقف {gold*0.995:.2f} (-0.5%)\n🎯 TP1 {gold*1.006:.2f} (+0.6%)\n🎯 TP2 {gold*1.015:.2f} (+1.5%)\n🎯 TP3 {gold*1.02:.2f} (+2%)\n💡 مخاطرة 1:3"
-                elif g_rsi >= 82:
-                    g_msg += f"\n\n🔥🔥 بيع نادر جدا\n⛔ وقف {gold*1.005:.2f} (+0.5%)\n🎯 TP1 {gold*0.994:.2f} (-0.6%)\n🎯 TP2 {gold*0.985:.2f} (-1.5%)\n🎯 TP3 {gold*0.98:.2f} (-2%)\n💡 مخاطرة 1:3"
-                elif g_rsi <= 32 and g_change >= 0.6:
-                    g_msg += f"\n\n🐋 حوت شراء قوي {g_change:.2f}%\n⛔ وقف {gold*0.995:.2f}\n🎯 TP1 {gold*1.008:.2f} (+0.8%)\n🎯 TP2 {gold*1.015:.2f} (+1.5%)"
-                elif g_rsi >= 72 and g_change <= -0.6:
-                    g_msg += f"\n\n🐋 حوت بيع قوي {g_change:.2f}%\n⛔ وقف {gold*1.005:.2f}\n🎯 TP1 {gold*0.992:.2f} (-0.8%)\n🎯 TP2 {gold*0.985:.2f} (-1.5%)"
-                else:
-                    g_msg += f"\n⚪ انتظار - ماكو اشارة"
+        current = float(close.iloc[-1])
+        filtered = [x for x in set([round(v,2) for v in levels]) if current*0.90 < x < current*1.10]
+        filtered = sorted(filtered, reverse=True)[:12]
 
-                # ===== بتكوين =====
-                b_msg = f"⏰ {now.strftime('%H:%M')} | ₿ بتكوين 30m\n💰 ${btc:,.0f} ({b_change:+.2f}%)\n📊 RSI {b_rsi:.0f}"
-                if b_rsi <= 22:
-                    b_msg += f"\n\n🔥🔥 شراء نادر جدا\n⛔ وقف {btc*0.99:,.0f} (-1%)\n🎯 TP1 {btc*1.012:,.0f} (+1.2%)\n🎯 TP2 {btc*1.025:,.0f} (+2.5%)\n🎯 TP3 {btc*1.04:,.0f} (+4%)"
-                elif b_rsi >= 82:
-                    b_msg += f"\n\n🔥🔥 بيع نادر جدا\n⛔ وقف {btc*1.01:,.0f} (+1%)\n🎯 TP1 {btc*0.988:,.0f} (-1.2%)\n🎯 TP2 {btc*0.975:,.0f} (-2.5%)\n🎯 TP3 {btc*0.96:,.0f} (-4%)"
-                elif b_rsi <= 32 and b_change >= 1.2:
-                    b_msg += f"\n\n🐋 حوت شراء قوي {b_change:.2f}%\n⛔ وقف {btc*0.99:,.0f}\n🎯 TP1 {btc*1.015:,.0f} (+1.5%)\n🎯 TP2 {btc*1.025:,.0f} (+2.5%)"
-                elif b_rsi >= 72 and b_change <= -1.2:
-                    b_msg += f"\n\n🐋 حوت بيع قوي {b_change:.2f}%\n⛔ وقف {btc*1.01:,.0f}\n🎯 TP1 {btc*0.985:,.0f} (-1.5%)\n🎯 TP2 {btc*0.975:,.0f} (-2.5%)"
-                else:
-                    b_msg += f"\n⚪ انتظار - ماكو اشارة"
+        final = []
+        for lvl in filtered:
+            final.append(lvl)
+            final.append(round(lvl - lvl*0.00045,2))
 
-                send(g_msg)
-                time.sleep(2)
-                send(b_msg)
+        return final[:24], d_close, d_high, d_low
+    except Exception as e:
+        print(f"Levels error {e}")
+        return None
 
-                time.sleep(60)
-            except Exception as e: print(f"Error: {e}"); time.sleep(10)
-        time.sleep(5)
+send("✅ بوت 30د + مستويات 10 بليل اشتغل\n💎 RSI 22 نادر 0.02 لوت\n🔥 RSI 30 عادي 0.01 لوت\n⏰ 24 رقم كل يوم 10 بليل\n💰 $50")
 
-@app.route("/")
-def home(): return "30m final ok"
-@app.route("/test")
-def test():
-    send("⏰ 10:30 | 🥇 ذهب 30m\n💰 $4195.60 (+0.30%)\n📊 RSI 55\n⚪ انتظار - ماكو اشارة")
-    time.sleep(1)
-    send("⏰ 10:30 | ₿ بتكوين 30m\n💰 $82,774 (+0.50%)\n📊 RSI 58\n⚪ انتظار - ماكو اشارة")
-    return "sent 30m test"
+last_heart = 0
+last_sig = 0
+last_levels_day = None
 
-threading.Thread(target=job, daemon=True).start()
-if __name__=="__main__": app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+while True:
+    try:
+        now_baghdad = datetime.datetime.now(TZ_BAGHDAD)
+
+        # مستويات كل يوم 10 بليل
+        if now_baghdad.hour == 22 and now_baghdad.minute < 5 and last_levels_day!= now_baghdad.date():
+            res = get_daily_levels()
+            if res:
+                blocks, d_close, d_high, d_low = res
+                msg = f"📊 مستويات ذهب باجر {now_baghdad.date() + datetime.timedelta(days=1)}\n"
+                msg += f"💰 اغلاق اليوم ${d_close:.2f}\n"
+                msg += f"📈 عالي ${d_high:.2f} واطي ${d_low:.2f}\n"
+                msg += f"⏰ فريم 30د\n\n"
+                for b in blocks:
+                    msg += f"{b}\n"
+                msg += f"\n💡 بيع يم الفوك، شراء يم الجوه"
+                send(msg)
+                last_levels_day = now_baghdad.date()
+
+        gold, rg, cg = get_data_30m("GC=F")
+        btc, rb, cb = get_data_30m("BTC-USD")
+
+        # فحص حي كل ساعة
+        if time.time() - last_heart > 3600:
+            if gold and btc:
+                send(f"💓 30د شغال\n🥇 ${gold:.1f} RSI {rg:.0f} {cg:+.2f}%\n₿ ${btc:.0f} RSI {rb:.0f} {cb:+.2f}%")
+            last_heart = time.time()
+
+        # اشارات 30د - كل 30 دقيقة
+        if time.time() - last_sig > 1800:
+            if gold:
+                if rg <= 22 and cg < -0.3:
+                    send(f"💎💎💎 شراء ذهب 30د الماس نادر\n💰 ${gold:.1f} RSI {rg:.0f}\n⛔ وقف ${gold*0.995:.1f}\n🎯 ${gold*1.015:.1f}\n📦 $50 = 0.02 لوت بقوة!\n💵 ربح $12.6")
+                    last_sig = time.time()
+                elif rg <= 30 and cg < -0.3:
+                    send(f"🔥 شراء ذهب 30د عادي\n💰 ${gold:.1f} RSI {rg:.0f}\n⛔ ${gold*0.995:.1f}\n🎯 ${gold*1.015:.1f}\n📦 0.01 لوت\n💵 $6.3")
+                    last_sig = time.time()
+                elif rg >= 82 and cg > 0.3:
+                    send(f"💎💎💎 بيع ذهب 30د الماس RSI {rg:.0f} ${gold:.1f}\n📦 0.02 لوت")
+                    last_sig = time.time()
+                elif rg >= 70 and cg > 0.3:
+                    send(f"🔻 بيع ذهب 30د RSI {rg:.0f} ${gold:.1f}\n📦 0.01 لوت")
+                    last_sig = time.time()
+
+            if btc and time.time() - last_sig > 1800:
+                if rb <= 30 and cb < -0.5:
+                    send(f"🥇 شراء بتكوين 30د ${btc:.0f} RSI {rb:.0f}\n📦 0.01 لوت")
+                    last_sig = time.time()
+
+        time.sleep(120)
+    except Exception as e:
+        send(f"⚠️ {e}")
+        time.sleep(60)
