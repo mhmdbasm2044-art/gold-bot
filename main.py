@@ -9,7 +9,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot GOLD+BTC TP/SL running"
+def home(): return "Bot GOLD+BTC Final"
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
@@ -58,7 +58,8 @@ def get_levels():
         return final[:24], dc, dh, dl
     except: return None
 
-send("✅ بوت GOLD+BTC TP/SL اشتغل\n🥇 ذهب + ₿ بتكوين\n📊 وقف واهداف مفعلة")
+# نفس رسالتك الي تحبها
+send("✅ بوت GOLD+BTC اشتغل\n🥇 ذهب 30د كل 30د\n₿ بتكوين 30د كل 30د\n📊 ذهب 24 رقم 10 بليل\nهجين 22=0.02 30=0.01\n🛑 وقف + ✅ اهداف مفعلة")
 
 t_gold = 0; t_btc = 0; t_levels = 0; t_heart = 0
 last_day = None
@@ -83,16 +84,16 @@ while True:
             if g:
                 if rsi <= 22:
                     sl = g - 25; tp1 = g + 15; tp2 = g + 35
-                    send(f"💎💎💎 [ذهب 30د الماس] شراء\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f} (-25$)\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.02 لوت")
+                    send(f"💎💎💎 [ذهب 30د الماس] شراء\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f}\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.02 لوت")
                 elif rsi <= 30:
                     sl = g - 20; tp1 = g + 12; tp2 = g + 28
-                    send(f"🔥 [ذهب 30د] شراء\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f} (-20$)\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.01")
+                    send(f"🔥 [ذهب 30د] شراء\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f}\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.01")
                 elif rsi >= 82:
                     sl = g + 25; tp1 = g - 15; tp2 = g - 35
-                    send(f"💎💎💎 [ذهب 30د الماس] بيع\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f} (+25$)\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.02")
+                    send(f"💎💎💎 [ذهب 30د الماس] بيع\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f}\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.02")
                 elif rsi >= 70:
                     sl = g + 20; tp1 = g - 12; tp2 = g - 28
-                    send(f"🔻 [ذهب 30د] بيع\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f} (+20$)\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.01")
+                    send(f"🔻 [ذهب 30د] بيع\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f}\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.01")
             t_gold = time.time()
 
         if time.time() - t_btc > 1800:
@@ -100,16 +101,16 @@ while True:
             if btc:
                 if rsi <= 22:
                     sl = btc * 0.985; tp1 = btc * 1.015; tp2 = btc * 1.035
-                    send(f"💎💎💎 [بتكوين 30د الماس] شراء\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f} (-1.5%)\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.02")
+                    send(f"💎💎💎 [بتكوين 30د الماس] شراء\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f}\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.02")
                 elif rsi <= 30:
                     sl = btc * 0.988; tp1 = btc * 1.012; tp2 = btc * 1.025
-                    send(f"🔥 [بتكوين 30د] شراء\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f} (-1.2%)\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.01")
+                    send(f"🔥 [بتكوين 30د] شراء\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f}\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.01")
                 elif rsi >= 82:
                     sl = btc * 1.015; tp1 = btc * 0.985; tp2 = btc * 0.965
-                    send(f"💎💎💎 [بتكوين 30د الماس] بيع\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f} (+1.5%)\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.02")
+                    send(f"💎💎💎 [بتكوين 30د الماس] بيع\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f}\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.02")
                 elif rsi >= 70:
                     sl = btc * 1.012; tp1 = btc * 0.988; tp2 = btc * 0.975
-                    send(f"🔻 [بتكوين 30د] بيع\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f} (+1.2%)\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.01")
+                    send(f"🔻 [بتكوين 30د] بيع\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f}\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.01")
             t_btc = time.time() + 90
 
         if time.time() - t_heart > 3600:
