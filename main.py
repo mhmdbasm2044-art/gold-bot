@@ -9,7 +9,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot GOLD+BTC Final"
+def home(): return "Bot GOLD+BTC Final 12PM"
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
@@ -58,8 +58,8 @@ def get_levels():
         return final[:24], dc, dh, dl
     except: return None
 
-# نفس رسالتك الي تحبها
-send("✅ بوت GOLD+BTC اشتغل\n🥇 ذهب 30د كل 30د\n₿ بتكوين 30د كل 30د\n📊 ذهب 24 رقم 10 بليل\nهجين 22=0.02 30=0.01\n🛑 وقف + ✅ اهداف مفعلة")
+# رسالة البداية النهائية
+send("✅ بوت GOLD+BTC اشتغل\n🥇 ذهب 30د كل 30د\n₿ بتكوين 30د كل 30د\n📊 ذهب 24 رقم 12 بليل بغداد\nهجين 22=0.02 30=0.01\n🛑 وقف + ✅ اهداف")
 
 t_gold = 0; t_btc = 0; t_levels = 0; t_heart = 0
 last_day = None
@@ -68,17 +68,19 @@ while True:
     try:
         now = datetime.now(timezone.utc) + timedelta(hours=3)
 
+        # مستويات الذهب كل يوم 12 بليل بغداد
         if time.time() - t_levels > 60:
-            if now.hour == 22 and now.minute < 10 and last_day!= now.date():
+            if now.hour == 0 and now.minute < 3 and last_day!= now.date():
                 r = get_levels()
                 if r:
                     b,c,h,l = r
-                    txt = f"📊 مستويات ذهب باجر {now.date() + timedelta(days=1)}\n💰 ${c:.2f} عالي ${h:.2f} واطي ${l:.2f}\n\n"
+                    txt = f"📊 مستويات ذهب باجر {now.date()} - 12 بليل بغداد\n💰 ${c:.2f} عالي ${h:.2f} واطي ${l:.2f}\n\n"
                     for x in b: txt+=f"{x}\n"
                     send(txt)
                     last_day = now.date()
             t_levels = time.time()
 
+        # ذهب 30د مع وقف واهداف
         if time.time() - t_gold > 1800:
             g,rsi = get_30m("GC=F")
             if g:
@@ -96,6 +98,7 @@ while True:
                     send(f"🔻 [ذهب 30د] بيع\n💰 دخول ${g:.1f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.1f}\n✅ هدف1 ${tp1:.1f}\n✅ هدف2 ${tp2:.1f}\n📦 0.01")
             t_gold = time.time()
 
+        # بتكوين 30د مع وقف واهداف
         if time.time() - t_btc > 1800:
             btc,rsi = get_30m("BTC-USD")
             if btc:
@@ -113,11 +116,12 @@ while True:
                     send(f"🔻 [بتكوين 30د] بيع\n💰 دخول ${btc:.0f}\nRSI {rsi:.0f}\n🛑 وقف ${sl:.0f}\n✅ هدف1 ${tp1:.0f}\n✅ هدف2 ${tp2:.0f}\n📦 0.01")
             t_btc = time.time() + 90
 
+        # نبض كل ساعة
         if time.time() - t_heart > 3600:
             g,rsi = get_30m("GC=F")
             btc,rsi2 = get_30m("BTC-USD")
             if g and btc:
-                send(f"💓 حي GOLD ${g:.0f} RSI {rsi:.0f} | BTC ${btc:.0f} RSI {rsi2:.0f} - {now.strftime('%H:%M')}")
+                send(f"💓 حي GOLD ${g:.0f} RSI {rsi:.0f} | BTC ${btc:.0f} RSI {rsi2:.0f} - {now.strftime('%H:%M')} بغداد")
             t_heart = time.time()
 
         time.sleep(20)
