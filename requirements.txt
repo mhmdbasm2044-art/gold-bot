@@ -2,5 +2,4 @@ Flask
 requests
 yfinance
 pandas
-requests
 pytz
