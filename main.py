@@ -1,71 +1,93 @@
 import requests, threading, time, os
 from flask import Flask
+from datetime import datetime
 
 app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
-gold_history = []
-TIMEFRAME = 48 # 4 ساعات = 48 قراءة (كل 5 دقايق)
+gold_hist = []
 
 def send(msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=15)
     except: pass
 
-def get_data():
-    global gold_history
+def calc(h,l,c):
+    p=(h+l+c)/3
+    return {"R3":h+2*(p-l),"R2":p+(h-l),"R1":2*p-l,"P":p,"S1":2*p-h,"S2":p-(h-l),"S3":l-2*(h-p)}
+
+def rsi(prices, period=14):
+    if len(prices) < period+1: return 50
+    gains=[]; losses=[]
+    for i in range(1, len(prices)):
+        diff = prices[i] - prices[i-1]
+        if diff>0: gains.append(diff); losses.append(0)
+        else: gains.append(0); losses.append(abs(diff))
+    avg_gain = sum(gains[-period:])/period
+    avg_loss = sum(losses[-period:])/period
+    if avg_loss==0: return 100
+    rs = avg_gain/avg_loss
+    return 100 - (100/(1+rs))
+
+def get_levels():
+    global gold_hist
     try:
-        g = float(requests.get("https://api.gold-api.com/price/XAU", timeout=10).json()['price'])
-        b_data = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=10).json()
-        btc = float(b_data['lastPrice'])
-        # نجيب شمعات 4 ساعات للبتكوين حقيقية
-        klines = requests.get("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=4h&limit=1", timeout=10).json()
-        btc_h = float(klines[0][2])
-        btc_l = float(klines[0][3])
+        k=requests.get("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=3m&limit=30", timeout=10).json()
+        closes=[float(x[4]) for x in k]
+        btc_h=max([float(x[2]) for x in k[-20:]]); btc_l=min([float(x[3]) for x in k[-20:]]); btc_c=closes[-1]
+        btc_lv=calc(btc_h,btc_l,btc_c)
+        btc_rsi=rsi(closes)
 
-        gold_history.append(g)
-        if len(gold_history) > TIMEFRAME:
-            gold_history.pop(0)
+        g=float(requests.get("https://api.gold-api.com/price/XAU", timeout=10).json()['price'])
+        gold_hist.append(g)
+        if len(gold_hist)>30: gold_hist.pop(0)
+        g_h=max(gold_hist[-20:]); g_l=min(gold_hist[-20:])
+        gold_lv=calc(g_h,g_l,g)
+        gold_rsi=rsi(gold_hist)
 
-        gold_h = max(gold_history) if len(gold_history) > 5 else g * 1.005
-        gold_l = min(gold_history) if len(gold_history) > 5 else g * 0.995
+        return gold_lv, btc_lv, g, btc_c, gold_rsi, btc_rsi
+    except: return None
 
-        return g, gold_h, gold_l, btc, btc_h, btc_l
-    except Exception as e:
-        print(e)
-        return None
-
-last_alert = 0
-def check():
-    global last_alert
+def job():
+    last_hour=-1
     while True:
-        d = get_data()
-        if d:
-            g, g_h, g_l, btc, btc_h, btc_l = d
-            print(f"4H | Gold {g} H:{g_h} L:{g_l} | BTC {btc} H:{btc_h} L:{btc_l}")
-            if time.time() - last_alert > 1800:
-                if g >= g_h * 0.999 and len(gold_history) > 10:
-                    send(f"🚀 <b>ذهب كسر مقاومة 4 ساعات</b>\n${g}\nاعلى 4س: ${g_h}\nاقل 4س: ${g_l}")
-                    last_alert = time.time()
-                elif g <= g_l * 1.001 and len(gold_history) > 10:
-                    send(f"🔻 <b>ذهب كسر دعم 4 ساعات</b>\n${g}\nاعلى 4س: ${g_h}\nاقل 4س: ${g_l}")
-                    last_alert = time.time()
-                elif btc >= btc_h * 0.998:
-                    send(f"🚀 <b>بتكوين مقاومة 4 ساعات</b>\n${btc:,.0f}\nاعلى: ${btc_h:,.0f} | اقل: ${btc_l:,.0f}")
-                    last_alert = time.time()
-                elif btc <= btc_l * 1.002:
-                    send(f"🔻 <b>بتكوين دعم 4 ساعات</b>\n${btc:,.0f}\nاعلى: ${btc_h:,.0f} | اقل: ${btc_l:,.0f}")
-                    last_alert = time.time()
-        time.sleep(300)
+        now=datetime.now()
+        if now.minute==0 and now.hour!=last_hour:
+            d=get_levels()
+            if d:
+                gl,bl,gp,bp,grsi,brsi=d
+                last_hour=now.hour
+
+                # تحليل الدخول
+                gold_signal = ""
+                if grsi>70 and gp>=gl['R1']: gold_signal="🔴 بيع قوي عند R1 (RSI متشبع)"
+                elif grsi<30 and gp<=gl['S1']: gold_signal="🟢 شراء قوي عند S1 (RSI هابط)"
+                else: gold_signal="⚪ انتظر كسر واضح"
+
+                btc_signal = ""
+                if brsi>70 and bp>=bl['R1']: btc_signal="🔴 بيع قوي عند R1"
+                elif brsi<30 and bp<=bl['S1']: btc_signal="🟢 شراء قوي عند S1"
+                else: btc_signal="⚪ انتظر كسر"
+
+                send(f"""⏰ <b>لستة {now.strftime('%H:00')} - 3د + RSI</b>
+
+🥇 <b>ذهب ${gp:.2f} | RSI {grsi:.0f}</b>
+R3 {gl['R3']:.2f} | R2 {gl['R2']:.2f} | R1 {gl['R1']:.2f}
+P {gl['P']:.2f}
+S1 {gl['S1']:.2f} | S2 {gl['S2']:.2f} | S3 {gl['S3']:.2f}
+{gold_signal}
+
+₿ <b>بتكوين ${bp:,.0f} | RSI {brsi:.0f}</b>
+R3 {bl['R3']:,.0f} | R2 {bl['R2']:,.0f} | R1 {bl['R1']:,.0f}
+P {bl['P']:,.0f}
+S1 {bl['S1']:,.0f} | S2 {bl['S2']:,.0f} | S3 {bl['S3']:,.0f}
+{btc_signal}
+""")
+        get_levels()
+        time.sleep(180)
 
 @app.route("/")
-def home():
-    d = get_data()
-    if not d: return "⏳ يجمع بيانات 4 ساعات..."
-    g, g_h, g_l, btc, btc_h, btc_l = d
-    return f"✅ افضل نظام - 4 ساعات<br>Gold: ${g} | H:{g_h:.1f} L:{g_l:.1f}<br>BTC: ${btc:,.0f} | H:{btc_h:,.0f} L:{btc_l:,.0f}<br>فحص كل 5 دقايق"
+def home(): return "✅ شغال - لستة + RSI"
 
-threading.Thread(target=check, daemon=True).start()
-if __name__ == "__main__":
+threading.Thread(target=job, daemon=True).start()
+if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
