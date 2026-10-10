@@ -1,5 +1,3 @@
-Flask
-requests
 yfinance
 pandas
-pytz
+requests
