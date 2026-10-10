@@ -1,35 +1,29 @@
 import requests, time, os, threading
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# هذا حتى Render يشوف بورت مفتوح
 app = Flask(__name__)
 @app.route('/')
-def home():
-    return "Bot is running 30m + levels"
-
+def home(): return "Bot GOLD+BTC running"
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
 threading.Thread(target=run_web, daemon=True).start()
 
 def send(msg):
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                       data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
-        print(f"Sent {msg[:20]}")
-    except Exception as e:
-        print(f"Send error {e}")
+    except: pass
 
-def get_30m():
+def get_30m(symbol):
     try:
-        df = yf.download("GC=F", period="2d", interval="30m", progress=False, auto_adjust=True)
+        df = yf.download(symbol, period="2d", interval="30m", progress=False, auto_adjust=True)
         if len(df) < 20: return None, None
         close = df['Close']
         if isinstance(close, pd.DataFrame): close = close.iloc[:,0]
@@ -64,35 +58,54 @@ def get_levels():
         return final[:24], dc, dh, dl
     except: return None
 
-send("✅ البوت النهائي اشتغل\n🔹 30د كل 30 دقيقة\n🔹 24 رقم 10 بليل\n🔹 هجين 22=0.02 30=0.01")
+send("✅ بوت GOLD+BTC اشتغل\n🥇 ذهب 30د كل 30د\n₿ بتكوين 30د كل 30د\n📊 ذهب 24 رقم 10 بليل\nهجين 22=0.02 30=0.01")
 
-t1 = 0; t2 = 0; t3 = 0
+t_gold = 0; t_btc = 0; t_levels = 0; t_heart = 0
 last_day = None
 
 while True:
     try:
-        now = datetime.utcnow() + timedelta(hours=3)
-        if time.time() - t1 > 60:
+        now = datetime.now(timezone.utc) + timedelta(hours=3)
+
+        # 1- مستويات ذهب 10 بليل
+        if time.time() - t_levels > 60:
             if now.hour == 22 and now.minute < 10 and last_day!= now.date():
                 r = get_levels()
                 if r:
                     b,c,h,l = r
-                    txt = f"📊 مستويات باجر {now.date() + timedelta(days=1)}\n💰 ${c:.2f} عالي ${h:.2f} واطي ${l:.2f}\n\n"
+                    txt = f"📊 مستويات ذهب باجر {now.date() + timedelta(days=1)}\n💰 ${c:.2f} عالي ${h:.2f} واطي ${l:.2f}\n\n"
                     for x in b: txt+=f"{x}\n"
                     send(txt)
                     last_day = now.date()
-            t1 = time.time()
-        if time.time() - t2 > 1800:
-            g,rsi = get_30m()
+            t_levels = time.time()
+
+        # 2- ذهب 30د كل 30د
+        if time.time() - t_gold > 1800:
+            g,rsi = get_30m("GC=F")
             if g:
-                if rsi <= 22: send(f"💎💎💎 [30د الماس] شراء ${g:.1f} RSI {rsi:.0f} 0.02 لوت")
-                elif rsi <= 30: send(f"🔥 [30د] شراء ${g:.1f} RSI {rsi:.0f} 0.01 لوت")
-                elif rsi >= 82: send(f"💎💎💎 [30د الماس] بيع ${g:.1f} RSI {rsi:.0f} 0.02")
-                elif rsi >= 70: send(f"🔻 [30د] بيع ${g:.1f} RSI {rsi:.0f} 0.01")
-            t2 = time.time()
-        if time.time() - t3 > 3600:
-            g,rsi = get_30m()
-            if g: send(f"💓 حي 30د ${g:.1f} RSI {rsi:.0f} - {now.strftime('%H:%M')}")
-            t3 = time.time()
+                if rsi <= 22: send(f"💎💎💎 [ذهب 30د الماس] شراء ${g:.1f} RSI {rsi:.0f}\n📦 0.02 لوت")
+                elif rsi <= 30: send(f"🔥 [ذهب 30د] شراء ${g:.1f} RSI {rsi:.0f}\n📦 0.01")
+                elif rsi >= 82: send(f"💎💎💎 [ذهب 30د الماس] بيع ${g:.1f} RSI {rsi:.0f}\n📦 0.02")
+                elif rsi >= 70: send(f"🔻 [ذهب 30د] بيع ${g:.1f} RSI {rsi:.0f}\n📦 0.01")
+            t_gold = time.time()
+
+        # 3- بتكوين 30د كل 30د (فحصه بعد الذهب بدقيقة حتى ما يصير سبام)
+        if time.time() - t_btc > 1800:
+            btc,rsi = get_30m("BTC-USD")
+            if btc:
+                if rsi <= 22: send(f"💎💎💎 [بتكوين 30د الماس] شراء ${btc:.0f} RSI {rsi:.0f}\n📦 0.02 لوت")
+                elif rsi <= 30: send(f"🔥 [بتكوين 30د] شراء ${btc:.0f} RSI {rsi:.0f}\n📦 0.01")
+                elif rsi >= 82: send(f"💎💎💎 [بتكوين 30د الماس] بيع ${btc:.0f} RSI {rsi:.0f}\n📦 0.02")
+                elif rsi >= 70: send(f"🔻 [بتكوين 30د] بيع ${btc:.0f} RSI {rsi:.0f}\n📦 0.01")
+            t_btc = time.time() + 90 # تأخير 90 ثانية عن الذهب
+
+        # 4- فحص حي كل ساعة
+        if time.time() - t_heart > 3600:
+            g,rsi = get_30m("GC=F")
+            btc,rsi2 = get_30m("BTC-USD")
+            if g and btc:
+                send(f"💓 حي GOLD ${g:.0f} RSI {rsi:.0f} | BTC ${btc:.0f} RSI {rsi2:.0f} - {now.strftime('%H:%M')}")
+            t_heart = time.time()
+
         time.sleep(20)
     except: time.sleep(30)
