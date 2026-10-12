@@ -1,160 +1,107 @@
 from flask import Flask, jsonify
 import yfinance as yf
-import pandas as pd
 from datetime import datetime
-import threading
-import time
-import requests
-import os
+import threading, time, requests, os, sys
 
 app = Flask(__name__)
+GREEN_LEVELS = {}
+last_signal_time = None
 
-# ============ الاعدادات ============
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "حط_التوكن_مالك_هنا")
-TELEGRAM_CHAT_ID = os.getenv("CHAT_ID", "حط_الايدي_مالك_هنا")
-SYMBOL = "GC=F"  # الذهب
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True, file=sys.stdout)
 
-levels = {}
-
-def send_telegram(msg):
+def fix_price(v):
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        data = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
-        requests.post(url, data=data, timeout=10)
+        if hasattr(v, 'values'): return float(v.values[0])
+        if hasattr(v, 'iloc'): return float(v.iloc[0])
+        return float(v)
+    except: return float(v)
+
+def calc_20_levels():
+    global GREEN_LEVELS
+    try:
+        log("📅 حساب 20 مستوى خضر جديد...")
+        data = yf.download("GC=F", period="10d", interval="1d", progress=False, auto_adjust=False)
+        high = fix_price(data['High'].iloc[-2])
+        low = fix_price(data['Low'].iloc[-2])
+        close = fix_price(data['Close'].iloc[-2])
+        rng = high - low
+        pivot = (high + low + close) / 3
+
+        GREEN_LEVELS = {}
+        # 10 مقاومات فوك
+        for i in range(1, 11):
+            price = pivot + (rng * i * 0.25)
+            GREEN_LEVELS[f"R{i}_{price:.2f}"] = round(price, 2)
+
+        # 10 دعوم جوه
+        for i in range(1, 11):
+            price = pivot - (rng * i * 0.25)
+            GREEN_LEVELS[f"S{i}_{price:.2f}"] = round(price, 2)
+
+        GREEN_LEVELS["date"] = datetime.now().strftime("%Y-%m-%d")
+        GREEN_LEVELS["pivot"] = round(pivot,2)
+        GREEN_LEVELS["high"] = high
+        GREEN_LEVELS["low"] = low
+
+        log(f"✅ 20 LEVEL DONE: {GREEN_LEVELS}")
+
+        token = os.getenv("TELEGRAM_TOKEN"); chat = os.getenv("CHAT_ID")
+        if token:
+            r_levels = "\n".join([f"🔴 {k}: {v}" for k,v in GREEN_LEVELS.items() if k.startswith("R")])
+            s_levels = "\n".join([f"🟢 {k}: {v}" for k,v in GREEN_LEVELS.items() if k.startswith("S")])
+            msg = f"📅 *20 مستوى جديد - {GREEN_LEVELS['date']}*\nPivot: {pivot:.2f}\n\n*مقاومات:*\n{r_levels}\n\n*دعوم:*\n{s_levels}"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={"chat_id": chat, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+
     except Exception as e:
-        print(f"Telegram Error: {e}")
+        import traceback; log(f"❌ {e}"); log(traceback.format_exc())
 
-def calc_daily_levels():
-    global levels
-    # يجيب بيانات امس
-    data = yf.download(SYMBOL, period="2d", interval="1d")
-    if len(data) < 1:
-        return
-    
-    high = float(data['High'].iloc[-1])
-    low = float(data['Low'].iloc[-1])
-    close = float(data['Close'].iloc[-1])
-    
-    pivot = (high + low + close) / 3
-    
-    # 24 مستوى لليوم الجديد - على طريقة 15د
-    levels = {
-        "R12": pivot + (high - low) * 1.5,
-        "R11": pivot + (high - low) * 1.2,
-        "R10": high + (high - low) * 0.5,
-        "R9": high + (high - low) * 0.2,
-        "R8": high,
-        "R7": pivot + (high - low) * 0.5,
-        "R6": pivot + (high - low) * 0.2,
-        "S1": pivot,
-        "S2": pivot - (high - low) * 0.2,
-        "S3": pivot - (high - low) * 0.5,
-        "S4": low,
-        "S5": low - (high - low) * 0.2,
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "pivot": pivot
-    }
-    
-    msg = f"""📅 *مستويات اليوم الجديدة - 15د*
-🗓️ التاريخ: {levels['date']}
-💰 اغلاق امس: {close:.2f}
+def send_signal(sig, name, lvl, price):
+    token = os.getenv("TELEGRAM_TOKEN"); chat = os.getenv("CHAT_ID")
+    if not token: return
+    stop = lvl - 2 if sig=="BUY" else lvl + 2
+    tp1 = lvl + 5 if sig=="BUY" else lvl - 5
+    tp2 = lvl + 10 if sig=="BUY" else lvl - 10
+    emoji = "🟢" if sig=="BUY" else "🔴"
+    txt = f"""{emoji} *{sig} 15m*
+💰 مباشر: {price:.2f}
+📍 {name} ({lvl})
+🛑 ستوب: {stop:.2f}
+🎯 هدف1: {tp1:.2f} | هدف2: {tp2:.2f}
+⏰ {datetime.now().strftime('%H:%M')} بغداد
+شمعة 15د {"فوك" if sig=="BUY" else "جوه"} الخط"""
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={"chat_id": chat, "text": txt, "parse_mode": "Markdown"}, timeout=10)
 
-*مقاومات (SELL):*
-🔴 {levels['R12']:.2f}
-🔴 {levels['R8']:.2f} - هاي اليوم
-🔴 {levels['R7']:.2f}
-
-*دعوم (BUY):*
-🟢 {levels['S1']:.2f} - بيفوت اليوم
-🟢 {levels['S4']:.2f} - لو امس
-🟢 {levels['S5']:.2f}
-
-البوت بدا يراقب فريم 15د
-"""
-    send_telegram(msg)
-    print("Levels Updated", levels)
-
-def check_15m_candle():
+def loop():
+    global last_signal_time
     while True:
         try:
-            if not levels:
-                calc_daily_levels()
-            
-            # يجيب اخر شمعتين 15د
-            df = yf.download(SYMBOL, period="1d", interval="15m")
-            if len(df) < 2:
-                time.sleep(60)
-                continue
-            
-            last_close = float(df['Close'].iloc[-1])
-            last_open = float(df['Open'].iloc[-1])
-            prev_close = float(df['Close'].iloc[-2])
-            
-            # شمعة جديدة فاتحة؟
-            is_new_candle = datetime.now().minute % 15 == 0
-            
-            if is_new_candle:
-                signal = None
-                entry = last_open
-                stop = 0
-                tp = 0
-                
-                # BUY اذا فتحت فوك دعم
-                for name, lvl in levels.items():
-                    if not isinstance(lvl, float):
-                        continue
-                    if prev_close < lvl and last_open > lvl and "S" in name:
-                        signal = "BUY"
-                        stop = lvl - 2.0
-                        tp = lvl + 5.0
-                        level_name = f"{name} ({lvl:.2f})"
-                        break
-                    if prev_close > lvl and last_open < lvl and "R" in name:
-                        signal = "SELL"
-                        stop = lvl + 2.0
-                        tp = lvl - 5.0
-                        level_name = f"{name} ({lvl:.2f})"
-                        break
-                
-                if signal:
-                    msg = f"""🚨 *اشارة جديدة - 15 دقيقة*
-⏰ الوقت: {datetime.now().strftime('%H:%M')} بتوقيت بغداد
-📊 الفريم: 15m
+            if not GREEN_LEVELS: calc_20_levels()
+            df = yf.download("GC=F", period="2d", interval="15m", progress=False, auto_adjust=False)
+            if len(df) < 2: time.sleep(30); continue
+            last_open = fix_price(df['Open'].iloc[-1])
+            prev_close = fix_price(df['Close'].iloc[-2])
+            now = datetime.now()
+            log(f"Live 15m: {last_open:.2f}")
 
-*النوع:* {signal} { '🟢' if signal=='BUY' else '🔴'}
-*السعر المباشر:* {entry:.2f}
-*المستوى:* {level_name}
-*الستوب:* {stop:.2f} (قريب 2$)
-*الهدف:* {tp:.2f} (قريب 5$)
+            if now.minute % 15 <= 1 and now.second < 40 and last_signal_time!= now.strftime("%Y-%m-%d %H:%M"):
+                for name, lvl in GREEN_LEVELS.items():
+                    if not isinstance(lvl, float): continue
+                    if "S" in name and prev_close < lvl and last_open > lvl:
+                        send_signal("BUY", name, lvl, last_open)
+                        last_signal_time = now.strftime("%Y-%m-%d %H:%M"); break
+                    if "R" in name and prev_close > lvl and last_open < lvl:
+                        send_signal("SELL", name, lvl, last_open)
+                        last_signal_time = now.strftime("%Y-%m-%d %H:%M"); break
 
-*الحالة:* شمعة جديدة فتحت {"فوك" if signal=="BUY" else "جوه"} الخط
-"""
-                    send_telegram(msg)
-                
-                time.sleep(60) # حتى ما يكرر الاشارة بنفس الشمعة
-            
-            # كل يوم ساعة 00:00 يحسب مستويات جديدة
-            if datetime.now().hour == 0 and datetime.now().minute == 0:
-                calc_daily_levels()
-                time.sleep(60)
-                
+            if now.hour == 0 and now.minute == 0:
+                calc_20_levels(); time.sleep(70)
         except Exception as e:
-            print(f"Error: {e}")
-        
-        time.sleep(30) # يفحص كل 30 ثانية
+            log(f"Loop err {e}")
+        time.sleep(30)
 
-# ============ Flask Routes for Render ============
 @app.route('/')
-def home():
-    return jsonify({"status": "running", "levels": levels, "time": datetime.now().isoformat()})
+def home(): return jsonify({"status": "20 LEVELS BOT", "levels": GREEN_LEVELS})
 
-@app.route('/levels')
-def get_levels():
-    return jsonify(levels)
-
-# تشغيل المراقبة بالخلفية
-threading.Thread(target=check_15m_candle, daemon=True).start()
-calc_daily_levels()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+threading.Thread(target=loop, daemon=True).start()
+calc_20_levels()
