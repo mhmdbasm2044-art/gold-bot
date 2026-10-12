@@ -20,7 +20,9 @@ def send(msg):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+        print("Sent OK")
+    except Exception as e:
+        print(e)
 
 def get_gold_price():
     try:
@@ -34,7 +36,6 @@ def get_gold_price():
             return 0
 
 def build_daily_levels(price):
-    # 20 مستوى - 10 جوة و 10 فوك - كل 10$
     base = int(price // 10) * 10
     levels = []
     for i in range(-10, 10):
@@ -43,7 +44,7 @@ def build_daily_levels(price):
 
 def check_market():
     global daily_levels, last_price, last_15m_slot, last_day
-    send("✅ *بوت الذهب 20 مستوى اشتغل*\n20 مستوى - فريم 15د - مستويات كل 10$")
+    send("Bot Gold 20 Levels Started - 15m")
     while True:
         try:
             price = get_gold_price()
@@ -55,18 +56,46 @@ def check_market():
             today_str = now.strftime("%Y-%m-%d")
             slot_15m = f"{today_str} {now.hour}:{int(now.minute/15)*15}"
 
-            if today_str != last_day:
+            if today_str!= last_day:
                 daily_levels = build_daily_levels(price)
                 last_day = today_str
-                txt = f"📅 *20 مستوى جديد - {today_str}*\nسعر الذهب الان: `{price:.2f}$`\n\n"
+                txt = "20 Level New - " + today_str + "\nPrice: " + str(round(price,2)) + "$\n"
                 for lv in daily_levels:
-                    txt += f"▫️ `{lv}$`\n"
-                txt += "\nبانتظار افتتاح شمعة 15د فوق/تحت المستوى"
+                    txt += str(lv) + "$\n"
                 send(txt)
 
-            is_new_candle = (slot_15m != last_15m_slot) and (now.minute % 15 == 0) and (now.second < 45)
+            is_new_candle = (slot_15m!= last_15m_slot) and (now.minute % 15 == 0) and (now.second < 45)
 
-            if is_new_candle and last_price != 0:
+            if is_new_candle and last_price!= 0:
                 for level in daily_levels:
                     if last_price < level and price >= level:
-                        send(f"🚀 *شراء -
+                        entry = price
+                        sl = entry - STOP
+                        tp = entry + TARGET
+                        msg = f"BUY Break Above {level}$\nEntry: {entry:.2f}$\nSL: {sl:.2f}$\nTP: {tp:.2f}$\nTime 15m: {now.strftime('%H:%M UTC')}"
+                        send(msg)
+                    elif last_price > level and price <= level:
+                        entry = price
+                        sl = entry + STOP
+                        tp = entry - TARGET
+                        msg = f"SELL Break Below {level}$\nEntry: {entry:.2f}$\nSL: {sl:.2f}$\nTP: {tp:.2f}$\nTime 15m: {now.strftime('%H:%M UTC')}"
+                        send(msg)
+                last_15m_slot = slot_15m
+
+            if last_15m_slot == "":
+                last_15m_slot = slot_15m
+
+            last_price = price
+            print(f"Live {price} {slot_15m}")
+        except Exception as e:
+            print(f"Error {e}")
+        time.sleep(30)
+
+threading.Thread(target=check_market, daemon=True).start()
+
+@app.route("/")
+def home():
+    return f"Gold 20 Levels Live | Price {last_price} | Levels {daily_levels}"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
