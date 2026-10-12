@@ -5,122 +5,113 @@ import requests
 
 app = Flask(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "ضع_توكن_البوت_هنا")
-CHAT_ID = os.environ.get("CHAT_ID", "ضع_الايدي_هنا")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+CHAT_ID = os.environ.get("CHAT_ID", "")
 
+last_price = 0
 daily_levels = []
-last_price = 4175.0 # سعر افتراضي حتى لو فشل يشتغل
-last_15m_slot = ""
 touched = {}
-last_error = "Starting..."
-
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+last_error = "Init"
+last_15m_slot = ""
 
 def send(msg):
+    if not BOT_TOKEN or not CHAT_ID: return
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except Exception as e:
-        print(e)
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except: pass
 
-def get_price():
+def get_real_market():
     global last_error
-
-    urls = [
-        ("https://api.gold-api.com/price/XAU", lambda j: float(j.get('price',0))),
-        ("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT", lambda j: float(j.get('price',0))),
-        ("https://api.binance.com/api/v3/ticker/price?symbol=XAUTUSDT", lambda j: float(j.get('price',0))),
-        ("https://data-asg.goldprice.org/dbXRates/USD", lambda j: float(j['items'][0]['xauPrice'])),
-    ]
-
-    for url, parser in urls:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=15)
-            if r.status_code == 200:
-                j = r.json()
-                p = parser(j)
-                if p > 1000:
-                    last_error = f"OK from {url} = {p}"
-                    return p
-                else:
-                    last_error = f"{url} returned small {p}"
-            else:
-                last_error = f"{url} status {r.status_code}"
-        except Exception as e:
-            last_error = f"{url} error {e}"
-            continue
-    return 0
-
-def build_levels(price):
-    base = int(price // 25) * 25
-    return [base-75, base-50, base-25, base, base+25, base+50, base+75]
-
-def check_market():
-    global daily_levels, last_price, last_15m_slot, touched
-    last_day = ""
-    time.sleep(3)
     try:
-        send(f"✅ البوت اشتغل - السعر الحالي {last_price}")
-    except:
-        pass
+        # 24hr high low حقيقي من Binance (نفس تريدنج فيو)
+        r = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=PAXGUSDT", timeout=10).json()
+        price = float(r['lastPrice'])
+        high = float(r['highPrice'])
+        low = float(r['lowPrice'])
+        close = float(r['prevClosePrice'])
+        last_error = f"LIVE {price}$ H:{high} L:{low}"
+        return price, high, low, close
+    except Exception as e:
+        last_error = f"Error {e}"
+        return 0,0,0,0
+
+def build_real_levels(price, high, low, close):
+    # Pivot Point حقيقي مثل تريدنج فيو
+    pp = (high + low + close) / 3
+    r1 = (2*pp) - low
+    s1 = (2*pp) - high
+    r2 = pp + (high - low)
+    s2 = pp - (high - low)
+    
+    # بس المستويات القريبة من السعر الحالي +-40$
+    levels = [s2, s1, pp, r1, r2]
+    real = []
+    for lv in levels:
+        if abs(lv - price) < 60:
+            real.append(round(lv,1))
+    
+    # اضيف مستوى نفسي واحد قوي بس اذا قريب
+    for psy in [4150, 4170, 4200, 4220]:
+        if abs(psy - price) < 40:
+            real.append(psy)
+            
+    real = sorted(list(set(real)))
+    return real, pp
+
+def check():
+    global last_price, daily_levels, touched, last_15m_slot
+    price, high, low, close = get_real_market()
+    while price==0:
+        time.sleep(10)
+        price, high, low, close = get_real_market()
+    
+    last_price = price
+    daily_levels, pp = build_real_levels(price, high, low, close)
+    
+    try:
+        txt = f"📊 تحليل حقيقي {price:.2f}$\nH:{high:.1f} L:{low:.1f}\nPivot:{pp:.1f}\n\n"
+        for lv in daily_levels:
+            txt += f"{'🔴 مقاومة' if lv>price else '🟢 دعم'} {lv}$\n"
+        send(txt)
+    except: pass
 
     while True:
         try:
-            price = get_price()
+            p,h,l,c = get_real_market()
+            if p!=0:
+                old = last_price
+                last_price = p
+                
+                now = datetime.utcnow()
+                slot = f"{now.hour}:{int(now.minute/15)*15}"
 
-            # اذا فشل نبقى على السعر القديم بس نحدث الخطأ بالصفحة
-            if price == 0:
-                print(f"Failed fetch, keep {last_price} | {last_error}")
-                time.sleep(20)
-                continue
+                for lv in daily_levels:
+                    if abs(last_price - lv) <= 2:
+                        touched[lv]=True
 
-            now = datetime.utcnow()
-            today_str = now.strftime("%Y-%m-%d")
-            slot_15m = f"{today_str} {now.hour}:{int(now.minute/15)*15}"
+                is_new = (slot!=last_15m_slot) and (now.minute % 15 == 0)
+                if is_new and last_15m_slot!="":
+                    for lv in daily_levels:
+                        if touched.get(lv):
+                            if old >= lv and last_price < lv:
+                                send(f"🔻 بيع ارتداد حقيقي من {lv}$\nدخول {last_price}$")
+                            elif old <= lv and last_price > lv:
+                                send(f"🚀 شراء ارتداد حقيقي من {lv}$\nدخول {last_price}$")
+                            touched[lv]=False
+                    last_15m_slot=slot
 
-            if today_str!= last_day or len(daily_levels)==0:
-                daily_levels = build_levels(price)
-                last_day = today_str
-                touched = {}
-                try:
-                    txt = f"مستويات اليوم {today_str}\nسعر {price:.2f}$\n" + "\n".join([f"{lv}$" for lv in daily_levels])
-                    send(txt)
-                except:
-                    pass
-
-            for level in daily_levels:
-                if abs(price - level) <= 3:
-                    touched[level] = True
-
-            is_new_candle = (slot_15m!= last_15m_slot) and (now.minute % 15 == 0)
-
-            if is_new_candle and last_price!= 0:
-                for level in daily_levels:
-                    if touched.get(level):
-                        if last_price >= level and price < level:
-                            send(f"بيع - ارتداد من {level}$ دخول {price:.2f}$")
-                            touched[level]=False
-                        elif last_price <= level and price > level:
-                            send(f"شراء - ارتداد من {level}$ دخول {price:.2f}$")
-                            touched[level]=False
-                last_15m_slot = slot_15m
-
-            if last_15m_slot=="":
-                last_15m_slot=slot_15m
-
-            last_price = price
-            print(f"Price OK {price}")
-
+                if last_15m_slot=="":
+                    last_15m_slot=slot
         except Exception as e:
-            last_error = str(e)
-            print(e)
-        time.sleep(20)
+            last_error=str(e)
+        time.sleep(15)
 
-threading.Thread(target=check_market, daemon=True).start()
+threading.Thread(target=check, daemon=True).start()
 
 @app.route("/")
 def home():
-    return f"السعر {last_price} | المستويات {daily_levels} | لمس {touched} | الحالة {last_error}"
+    return f"سعر حقيقي {last_price}$ | مستويات حقيقية {daily_levels} | {last_error}"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
