@@ -1,101 +1,72 @@
-from flask import Flask, jsonify
-import threading, time, requests, os
-from datetime import datetime, timedelta
+import os, time, threading
+from datetime import datetime
+from flask import Flask
+import requests
 
 app = Flask(__name__)
-LEVELS = {}
-LAST_CANDLE = ""
-STARTED = False
 
-def get_price():
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "ضع_توكن_البوت_هنا")
+CHAT_ID = os.environ.get("CHAT_ID", "ضع_الايدي_هنا")
+
+STOP = 4.0
+TARGET = 8.0
+
+daily_levels = []
+last_price = 0
+last_15m_slot = ""
+last_day = ""
+
+def send(msg):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
+
+def get_gold_price():
     try:
         r = requests.get("https://api.gold-api.com/price/XAU", timeout=10).json()
         return float(r['price'])
     except:
-        return 4185.0
-
-def calc_levels():
-    global LEVELS
-    p = get_price()
-    LEVELS = {}
-    for i in range(1, 11):
-        LEVELS[f"R{i}"] = round(p + i*4, 2)
-        LEVELS[f"S{i}"] = round(p - i*4, 2)
-    LEVELS["date"] = datetime.now().strftime("%Y-%m-%d")
-    LEVELS["base"] = p
-    print(f"✅ 20 LEVELS {p}", flush=True)
-    # دز يومية
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat = os.getenv("CHAT_ID")
-    if token and chat:
         try:
-            txt = "\n".join([f"{k}: {v}" for k,v in LEVELS.items() if isinstance(v,float)])
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                data={"chat_id": chat, "text": f"📅 مستويات جديدة {LEVELS['date']}\nBase {p}\n\n{txt}"}, timeout=10)
-        except: pass
+            r = requests.get("https://data-asg.goldprice.org/dbXRates/USD", timeout=10).json()
+            return float(r['items'][0]['xauPrice'])
+        except:
+            return 0
 
-def send_signal(sig, name, lvl, live, prev):
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat = os.getenv("CHAT_ID")
-    if not token or not chat: return
-    stop = lvl - 2.5 if sig=="BUY" else lvl + 2.5
-    tp1 = lvl + 5 if sig=="BUY" else lvl - 5
-    tp2 = lvl + 10 if sig=="BUY" else lvl - 10
-    em = "🟢" if sig=="BUY" else "🔴"
-    d = "فوك الخط" if sig=="BUY" else "جوه الخط"
-    msg = f"""{em} {sig} 15M
-📍 {name} {lvl}
-💰 مباشر: {live:.2f} | سابق: {prev:.2f}
-📊 شمعة 15د: {d}
-🛑 ستوب: {stop:.2f} (2.5$)
-🎯 هدف1: {tp1:.2f}
-🎯 هدف2: {tp2:.2f}
-⏰ {(datetime.now()+timedelta(hours=3)).strftime('%H:%M')} بغداد"""
-    try:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={"chat_id": chat, "text": msg}, timeout=10)
-    except: pass
+def build_daily_levels(price):
+    # 20 مستوى - 10 جوة و 10 فوك - كل 10$
+    base = int(price // 10) * 10
+    levels = []
+    for i in range(-10, 10):
+        levels.append(base + (i * 10))
+    return sorted(levels)
 
-def loop():
-    global LAST_CANDLE
-    calc_levels()
-    prev = get_price()
+def check_market():
+    global daily_levels, last_price, last_15m_slot, last_day
+    send("✅ *بوت الذهب 20 مستوى اشتغل*\n20 مستوى - فريم 15د - مستويات كل 10$")
     while True:
         try:
-            now = datetime.now() + timedelta(hours=3)
-            live = get_price()
-            if now.hour == 0 and now.minute < 2:
-                calc_levels()
-                time.sleep(70)
-            is_new = (now.minute % 15 == 0 and now.second < 50)
-            cid = now.strftime("%d %H:%M")
-            if is_new and cid != LAST_CANDLE:
-                for n,l in list(LEVELS.items()):
-                    if not isinstance(l,float): continue
-                    if "S" in n and prev < l and live > l:
-                        send_signal("BUY", n, l, live, prev)
-                        break
-                    if "R" in n and prev > l and live < l:
-                        send_signal("SELL", n, l, live, prev)
-                        break
-                LAST_CANDLE = cid
-            prev = live
-            print(f"Live {live} {now.strftime('%H:%M')}", flush=True)
-        except Exception as e:
-            print(f"err {e}", flush=True)
-        time.sleep(30)
+            price = get_gold_price()
+            if price == 0:
+                time.sleep(20)
+                continue
 
-def start_bot():
-    time.sleep(5)
-    threading.Thread(target=loop, daemon=True).start()
+            now = datetime.utcnow()
+            today_str = now.strftime("%Y-%m-%d")
+            slot_15m = f"{today_str} {now.hour}:{int(now.minute/15)*15}"
 
-@app.route('/')
-def home():
-    global STARTED
-    if not STARTED:
-        STARTED = True
-        threading.Thread(target=start_bot, daemon=True).start()
-    return jsonify({"status":"✅ BOT WORKING 20 LEVELS","live":get_price(),"levels":LEVELS,"time": (datetime.now()+timedelta(hours=3)).strftime('%Y-%m-%d %H:%M')})
+            if today_str != last_day:
+                daily_levels = build_daily_levels(price)
+                last_day = today_str
+                txt = f"📅 *20 مستوى جديد - {today_str}*\nسعر الذهب الان: `{price:.2f}$`\n\n"
+                for lv in daily_levels:
+                    txt += f"▫️ `{lv}$`\n"
+                txt += "\nبانتظار افتتاح شمعة 15د فوق/تحت المستوى"
+                send(txt)
 
-@app.route('/levels')
-def levels():
-    return jsonify(LEVELS)
+            is_new_candle = (slot_15m != last_15m_slot) and (now.minute % 15 == 0) and (now.second < 45)
+
+            if is_new_candle and last_price != 0:
+                for level in daily_levels:
+                    if last_price < level and price >= level:
+                        send(f"🚀 *شراء -
