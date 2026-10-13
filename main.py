@@ -2,122 +2,83 @@ import os, time, threading
 from datetime import datetime
 from flask import Flask
 import requests
-
 app = Flask(__name__)
+BOT_TOKEN=os.environ.get("BOT_TOKEN","")
+CHAT_ID=os.environ.get("CHAT_ID","")
+last_price=0
+zones=[]
+touched={}
+last_error="Init"
+last_3m=""
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "")
-
-last_price = 0
-daily_levels = []
-touched = {}
-last_error = "Starting..."
-last_15m_slot = ""
-
-def send(msg):
-    if not BOT_TOKEN or not CHAT_ID: return
+def send(m):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",data={"chat_id":CHAT_ID,"text":m},timeout=10)
     except: pass
 
-def get_price_real():
+def get_market():
     global last_error
-    # 1 - Binance Vision (هذا ما ينحجب بـ Render)
     try:
-        r = requests.get("https://data-api.binance.vision/api/v3/ticker/24hr?symbol=PAXGUSDT", timeout=10).json()
-        p = float(r['lastPrice'])
-        h = float(r['highPrice'])
-        l = float(r['lowPrice'])
-        if p>1000:
-            last_error=f"OK Binance Vision {p}"
-            return p,h,l,float(r['prevClosePrice'])
+        r=requests.get("https://data-api.binance.vision/api/v3/ticker/24hr?symbol=PAXGUSDT",timeout=10).json()
+        p=float(r['lastPrice']);h=float(r['highPrice']);l=float(r['lowPrice']);c=float(r['prevClosePrice'])
+        last_error=f"OK {p}";return p,h,l,c
     except Exception as e:
-        last_error=f"Vision fail {e}"
+        last_error=str(e);return 0,0,0,0
 
-    # 2 - CoinGecko (يشتغل دائما)
-    try:
-        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=pax-gold&vs_currencies=usd", timeout=10).json()
-        p = float(r['pax-gold']['usd'])
-        if p>1000:
-            last_error=f"OK CoinGecko {p}"
-            # هاي وليو تقديرية
-            return p, p+20, p-20, p
-    except Exception as e:
-        last_error=f"Gecko fail {e}"
-
-    # 3 - Gold-API
-    try:
-        r = requests.get("https://api.gold-api.com/price/XAU", timeout=10).json()
-        p = float(r['price'])
-        if p>1000:
-            last_error=f"OK GoldAPI {p}"
-            return p, p+20, p-20, p
-    except Exception as e:
-        last_error=f"All fail {e}"
-
-    return 0,0,0,0
-
-def build_levels(price, high, low, close):
-    pp = (high+low+close)/3
-    r1 = (2*pp)-low
-    s1 = (2*pp)-high
-    levels=[]
-    for lv in [s1, pp, r1]:
-        if abs(lv-price)<50 and lv>1000:
-            levels.append(round(lv,1))
-    # اضيف اقرب مستوى نفسي حقيقي بس واحد
-    for psy in [4150,4170,4180,4200]:
-        if abs(psy-price)<25:
-            levels.append(psy)
-    return sorted(list(set(levels))), pp
+def build_zones(h,l,c):
+    rng=h-l
+    if rng<20: rng=224.6
+    raw=[("R4",c+rng*1.1/2),("R3",c+rng*1.1/4),("R2",c+rng*1.1/6),("R1",c+rng*1.1/12),("PP",c),("S1",c-rng*1.1/12),("S2",c-rng*1.1/6),("S3",c-rng*1.1/4),("S4",c-rng*1.1/2)]
+    res=[]
+    for name,mid in raw:
+        res.append((round(mid+1.25,2),round(mid-1.25,2),name,round(mid,2)))
+    return sorted(res,key=lambda x:x[3],reverse=True)
 
 def worker():
-    global last_price, daily_levels, touched, last_15m_slot
-    # حاول تجيب السعر فورا
-    for _ in range(10):
-        p,h,l,c = get_price_real()
+    global last_price,zones,last_3m
+    for _ in range(20):
+        p,h,l,c=get_market()
         if p!=0:
-            last_price=p
-            daily_levels, pp = build_levels(p,h,l,c)
-            try:
-                send(f"✅ اشتغل\nسعر {p:.2f}$\nمستويات {daily_levels}\nPivot {pp:.1f}")
-            except: pass
-            break
+            last_price=p;zones=build_zones(h,l,c)
+            txt=f"✅ 3د + يومي\nسعر {p:.2f}$ H {h:.0f} L {l:.0f}\n"
+            for up,lo,n,_ in zones: txt+=f"{n}: {up},{lo}\n"
+            send(txt);break
         time.sleep(3)
-
     while True:
         try:
-            p,h,l,c = get_price_real()
+            p,h,l,c=get_market()
             if p!=0:
-                old=last_price
-                last_price=p
+                old=last_price;last_price=p
                 now=datetime.utcnow()
-                slot=f"{now.hour}:{int(now.minute/15)*15}"
-                for lv in daily_levels:
-                    if abs(p-lv)<=2:
-                        touched[lv]=True
-                is_new=(slot!=last_15m_slot) and (now.minute%15==0)
-                if is_new and last_15m_slot!="":
-                    for lv in daily_levels:
-                        if touched.get(lv):
-                            if old>=lv and p<lv:
-                                send(f"🔻 بيع من {lv}$ دخول {p:.1f}$")
-                            elif old<=lv and p>lv:
-                                send(f"🚀 شراء من {lv}$ دخول {p:.1f}$")
-                            touched[lv]=False
-                    last_15m_slot=slot
-                if last_15m_slot=="":
-                    last_15m_slot=slot
-        except Exception as e:
-            last_error=str(e)
-        time.sleep(20)
+                slot=f"{now.hour}:{now.minute//3}"
+                # تحديث يومي الساعة 00:00
+                if now.hour==0 and now.minute<2:
+                    zones=build_zones(h,l,c)
+                    send(f"📊 مستويات جديدة {now.date()}\n"+ "\n".join([f"{n}: {u},{lo}" for u,lo,n,_ in zones]))
 
-threading.Thread(target=worker, daemon=True).start()
+                for up,lo,name,_ in zones:
+                    if lo-1 <= p <= up+1:
+                        touched[name]=True
 
+                is_new = (slot!=last_3m) and (now.minute%3==0)
+                if is_new and last_3m!="":
+                    for up,lo,name,mid in zones:
+                        if touched.get(name):
+                            if old>=up and p<lo:
+                                send(f"🔻 بيع 3د {name} {up}-{lo} دخول {p:.2f}$")
+                            elif old<=lo and p>up:
+                                send(f"🚀 شراء 3د {name} {up}-{lo} دخول {p:.2f}$")
+                            touched[name]=False
+                    last_3m=slot
+                if last_3m=="": last_3m=slot
+        except: pass
+        time.sleep(10)
+
+threading.Thread(target=worker,daemon=True).start()
 @app.route("/")
 def home():
-    return f"سعر حقيقي {last_price}$ | مستويات حقيقية {daily_levels} | {last_error}"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    t=f"3د يومي | {last_price}$ | {last_error}<br>"
+    for up,lo,n,mid in zones: t+=f"{n}: {up},{lo} mid {mid}<br>"
+    return t
+if __name__=="__main__":
+    app.run(host="0.0.0.0",port=10000)
