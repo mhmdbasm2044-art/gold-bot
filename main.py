@@ -12,9 +12,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"تم: جاري عمل الفيديو - {text}")
 
 def main():
-    if not TOKEN:
-        print("ERROR: TOKEN not found!")
-        return
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
