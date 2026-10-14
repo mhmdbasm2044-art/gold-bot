@@ -1,81 +1,50 @@
-from flask import Flask
-import os, json, threading, time, random
-import telebot
+# ملف main.py - انسخه كامل
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from gtts import gTTS
+from moviepy.editor import ImageClip, AudioFileClip
+import os
 
-# --- Flask حتى Render ما يطفي ---
-app = Flask(__name__)
+TOKEN = "حط توكنك من BotFather هنا"
+CHANNEL = "@اسم قناتك هنا"  # اذا ما عندك قناة امسح هذا السطر
 
-@app.route('/')
-def home():
-    return "Gold Bot is Live - Fixed"
+قصص = {
+    "ارنب": "كان يا ما كان ارنب صغير اسمه بوبو يحب الجزر، كان يشارك اصحابه واصبح محبوبا",
+    "اسد": "الاسد سيمبا ملك الغابة الطيب يحمي الحيوانات",
+    "فيل": "الفيل فلفول ساعد الحيوانات تعبر النهر",
+    "قرد": "القرد شاطر وزع الموز على الجميع",
+    "ببغاء": "الببغاء لولو تنقل اخبار الغابة",
+    "سلحفاة": "السلحفاة توتا فازت بالسباق لانها لم تستسلم"
+}
 
-# --- اعدادات البوت ---
-TOKEN = os.environ.get("BOT_TOKEN", "8871511463:AAHptY0mk4Ecn7BTsZHlNDDT7gwUsO6eVu8")
-bot = telebot.TeleBot(TOKEN)
-
-DB_FILE = "db.json"
-
-def load_db():
-    if not os.path.exists(DB_FILE):
-        return {"users": {}}
-    try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {"users": {}}
-
-def save_db(db):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-
-# /start
-@bot.message_handler(commands=['start'])
-def start(m):
-    db = load_db()
-    uid = str(m.from_user.id)
-    if uid not in db["users"]:
-        db["users"][uid] = {"points": 0, "name": m.from_user.first_name}
-        save_db(db)
-    bot.send_message(m.chat.id, f"اهلا {m.from_user.first_name} 👋\nاستخدم الازرار")
-
-# ⭐ نقاطي
-@bot.message_handler(func=lambda m: m.text == "⭐ نقاطي")
-def points(m):
-    db = load_db()
-    uid = str(m.from_user.id)
-    p = db["users"].get(uid, {}).get("points", 0)
-    bot.send_message(m.chat.id, f"⭐ نقاطك: {p}")
-
-# 📋 المهام
-@bot.message_handler(func=lambda m: m.text == "📋 المهام")
-def tasks(m):
-    db = load_db()
-    # نجيب 3 يوزرات عشوائية
-    users = [u for uid, u in db["users"].items()]
-    if len(users) < 3:
-        bot.send_message(m.chat.id, "⏳ انتظر ناس جدد")
+async def رد(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    حيوان = update.message.text.strip().lower()
+    if حيوان not in قصص:
+        await update.message.reply_text("اكتب: ارنب / اسد / فيل / قرد / ببغاء / سلحفاة")
         return
-    # اذا اكو ناس
-    selected = random.sample(users, 3)
-    text = "📋 مهام اليوم:\n"
-    for u in selected:
-        text += f"- {u.get('name','مستخدم')}\n"
-    bot.send_message(m.chat.id, text)
+    
+    قصة = قصص[حيوان]
+    await update.message.reply_text(f"⏳ جاري صنع فيديو {حيوان}...")
 
-# تشغيل البوت
-def run_bot():
-    print("Bot polling started...")
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"Bot error: {e}")
-            time.sleep(5)
+    tts = gTTS(text=قصة, lang='ar')
+    tts.save("صوت.mp3")
+    
+    صوت = AudioFileClip("صوت.mp3")
+    # استخدم صورة افتراضية اذا ما عندك
+    from PIL import Image, ImageDraw
+    img = Image.new('RGB', (1280,720), color=(135,206,235))
+    d = ImageDraw.Draw(img)
+    d.text((400,350), f"قصة {حيوان}", fill=(0,0,0))
+    img.save("صورة.jpg")
+    
+    صورة = ImageClip("صورة.jpg").set_duration(صوت.duration)
+    صورة = صورة.resize(lambda t: 1 + 0.03*t).set_audio(صوت)
+    صورة.write_videofile(f"{حيوان}.mp4", fps=24, logger=None)
+    
+    await update.message.reply_video(video=open(f"{حيوان}.mp4", 'rb'), caption=f"✅ فيديو {حيوان} جاهز للرفع!")
+    os.remove("صوت.mp3")
+    os.remove(f"{حيوان}.mp4")
 
-# شغل البوت بثريد منفصل
-threading.Thread(target=run_bot, daemon=True).start()
-
-# شغل Flask
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, رد))
+app.run_polling()
