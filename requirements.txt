@@ -1,4 +1,5 @@
-python-telegram-bot
-gtts
+python-telegram-bot==20.7
+gTTS==2.4.0
 moviepy
-Pillow
+pillow
+imageio-ffmpeg
