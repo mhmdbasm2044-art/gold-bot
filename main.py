@@ -64,5 +64,5 @@ def tasks(m):
     db = load_db()
     # نجيب 3 يوزرات عشوائية
     users = [u for uid,u in db["users"].items() if u["username"] and uid!= str(m.from_user.id)]
-    if len(users) < 3:
-        bot.send_message(m.chat.id, "⏳ ماكو حسابات كافية حاليا، انتظر ناس جد
+    if len(users) < 
+    bot.send_message(m.chat.id, "⏳ انتظر ناس جدد")
