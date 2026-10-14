@@ -11,7 +11,7 @@ except:
 from gtts import gTTS
 import tempfile
 
-TOKEN = os.environ.get("TOKEN")
+TOKEN = "8871511463:AAHptY0mk4Ecn7BTsZHlNDDT7gwUsO6eVu8"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("هلا! دزلي كلمة مثل: ارنب، اسد، فيل")
