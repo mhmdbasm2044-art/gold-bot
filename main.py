@@ -1,53 +1,45 @@
-# ملف main.py - انسخه كامل
+import os
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
-from gtts import gTTS
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+# جرب استيراد moviepy بطريقتين
 try:
     from moviepy.editor import ImageClip, AudioFileClip
-except ImportError:
+except:
     from moviepy import ImageClip, AudioFileClip
-import os
 
-TOKEN = "حط توكنك من BotFather هنا"
-CHANNEL = "@اسم قناتك هنا"  # اذا ما عندك قناة امسح هذا السطر
+from gtts import gTTS
+import tempfile
 
-قصص = {
-    "ارنب": "كان يا ما كان ارنب صغير اسمه بوبو يحب الجزر، كان يشارك اصحابه واصبح محبوبا",
-    "اسد": "الاسد سيمبا ملك الغابة الطيب يحمي الحيوانات",
-    "فيل": "الفيل فلفول ساعد الحيوانات تعبر النهر",
-    "قرد": "القرد شاطر وزع الموز على الجميع",
-    "ببغاء": "الببغاء لولو تنقل اخبار الغابة",
-    "سلحفاة": "السلحفاة توتا فازت بالسباق لانها لم تستسلم"
-}
+TOKEN = os.environ.get("TOKEN")
 
-async def رد(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    حيوان = update.message.text.strip().lower()
-    if حيوان not in قصص:
-        await update.message.reply_text("اكتب: ارنب / اسد / فيل / قرد / ببغاء / سلحفاة")
-        return
-    
-    قصة = قصص[حيوان]
-    await update.message.reply_text(f"⏳ جاري صنع فيديو {حيوان}...")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("هلا! دزلي كلمة مثل: ارنب، اسد، فيل")
 
-    tts = gTTS(text=قصة, lang='ar')
-    tts.save("صوت.mp3")
-    
-    صوت = AudioFileClip("صوت.mp3")
-    # استخدم صورة افتراضية اذا ما عندك
-    from PIL import Image, ImageDraw
-    img = Image.new('RGB', (1280,720), color=(135,206,235))
-    d = ImageDraw.Draw(img)
-    d.text((400,350), f"قصة {حيوان}", fill=(0,0,0))
-    img.save("صورة.jpg")
-    
-    صورة = ImageClip("صورة.jpg").set_duration(صوت.duration)
-    صورة = صورة.resize(lambda t: 1 + 0.03*t).set_audio(صوت)
-    صورة.write_videofile(f"{حيوان}.mp4", fps=24, logger=None)
-    
-    await update.message.reply_video(video=open(f"{حيوان}.mp4", 'rb'), caption=f"✅ فيديو {حيوان} جاهز للرفع!")
-    os.remove("صوت.mp3")
-    os.remove(f"{حيوان}.mp4")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    await update.message.reply_text(f"جاري عمل فيديو لـ: {text} ...")
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, رد))
-app.run_polling()
+    # هنا الكود مالتك مال انشاء الفيديو
+    # مثال بسيط:
+    try:
+        tts = gTTS(text=text, lang='ar')
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as fp:
+            tts.save(fp.name)
+            audio = AudioFileClip(fp.name)
+            clip = ImageClip("image.jpg", duration=audio.duration) # حط صورتك
+            clip = clip.with_audio(audio)
+            clip.write_videofile("output.mp4", fps=24)
+        
+        await update.message.reply_video(video=open("output.mp4", "rb"))
+    except Exception as e:
+        await update.message.reply_text(f"صار خطأ: {e}")
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
