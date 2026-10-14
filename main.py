@@ -2,7 +2,10 @@
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 from gtts import gTTS
-from moviepy.editor import ImageClip, AudioFileClip
+try:
+    from moviepy.editor import ImageClip, AudioFileClip
+except ImportError:
+    from moviepy import ImageClip, AudioFileClip
 import os
 
 TOKEN = "حط توكنك من BotFather هنا"
