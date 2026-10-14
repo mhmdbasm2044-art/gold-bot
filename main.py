@@ -2,16 +2,14 @@ import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-TOKEN = os.environ.get("TOKEN")
-# اذا ما تريد Environment خلي توكنك مباشر هنا:
-# TOKEN = "8871511463:AAHptY0mk4Ecn7BTsZHlNDDT7gwUsO6eVu8"
+TOKEN = "8871511463:AAHptY0mk4Ecn7BTsZH1NDDT7gwUs06eVu8"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("هلا والله! دزلي اسم حيوان")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    await update.message.reply_text(f"استلمت: {text} - جاري عمل الفيديو...")
+    await update.message.reply_text(f"تم: جاري عمل الفيديو - {text}")
 
 def main():
     if not TOKEN:
