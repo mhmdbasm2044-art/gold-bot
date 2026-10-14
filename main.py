@@ -10,7 +10,7 @@ def home():
     return "Gold Bot is Live - Fixed"
 
 # --- اعدادات البوت ---
-TOKEN = os.environ.get("BOT_TOKEN", "ضع_التوكن_هنا")
+TOKEN = os.environ.get("BOT_TOKEN", "8871511463:AAHptY0mk4Ecn7BTsZHlNDDT7gwUsO6eVu8")
 bot = telebot.TeleBot(TOKEN)
 
 DB_FILE = "db.json"
