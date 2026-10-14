@@ -1,84 +1,68 @@
-import os, time, threading
-from datetime import datetime
+import os, json
 from flask import Flask
-import requests
+import telebot
+from telebot import types
+
 app = Flask(__name__)
-BOT_TOKEN=os.environ.get("BOT_TOKEN","")
-CHAT_ID=os.environ.get("CHAT_ID","")
-last_price=0
-zones=[]
-touched={}
-last_error="Init"
-last_3m=""
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+bot = telebot.TeleBot(BOT_TOKEN)
 
-def send(m):
+# تخزين بسيط بالنقاط
+DB_FILE = "/tmp/db.json"
+def load_db():
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",data={"chat_id":CHAT_ID,"text":m},timeout=10)
-    except: pass
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {"users": {}, "pending": {}}
 
-def get_market():
-    global last_error
-    try:
-        r=requests.get("https://data-api.binance.vision/api/v3/ticker/24hr?symbol=PAXGUSDT",timeout=10).json()
-        p=float(r['lastPrice']);h=float(r['highPrice']);l=float(r['lowPrice']);c=float(r['prevClosePrice'])
-        last_error=f"OK {p}";return p,h,l,c
-    except Exception as e:
-        last_error=str(e);return 0,0,0,0
+def save_db(db):
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f)
 
-def build_zones(h,l,c):
-    rng=h-l
-    if rng<20: rng=224.6
-    raw=[("R4",c+rng*1.1/2),("R3",c+rng*1.1/4),("R2",c+rng*1.1/6),("R1",c+rng*1.1/12),("PP",c),("S1",c-rng*1.1/12),("S2",c-rng*1.1/6),("S3",c-rng*1.1/4),("S4",c-rng*1.1/2)]
-    res=[]
-    for name,mid in raw:
-        res.append((round(mid+1.25,2),round(mid-1.25,2),name,round(mid,2)))
-    return sorted(res,key=lambda x:x[3],reverse=True)
+@bot.message_handler(commands=['start'])
+def start(m):
+    db = load_db()
+    uid = str(m.from_user.id)
+    if uid not in db["users"]:
+        db["users"][uid] = {"username": "", "points": 0}
+        save_db(db)
 
-def worker():
-    global last_price,zones,last_3m
-    for _ in range(20):
-        p,h,l,c=get_market()
-        if p!=0:
-            last_price=p;zones=build_zones(h,l,c)
-            txt=f"✅ 3د + يومي\nسعر {p:.2f}$ H {h:.0f} L {l:.0f}\n"
-            for up,lo,n,_ in zones: txt+=f"{n}: {up},{lo}\n"
-            send(txt);break
-        time.sleep(3)
-    while True:
-        try:
-            p,h,l,c=get_market()
-            if p!=0:
-                old=last_price;last_price=p
-                now=datetime.utcnow()
-                slot=f"{now.hour}:{now.minute//3}"
-                # تحديث يومي الساعة 00:00
-                if now.hour==0 and now.minute<2:
-                    zones=build_zones(h,l,c)
-                    send(f"📊 مستويات جديدة {now.date()}\n"+ "\n".join([f"{n}: {u},{lo}" for u,lo,n,_ in zones]))
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("📤 نشر حسابي", "⭐ نقاطي", "📋 مهام المتابعة")
 
-                for up,lo,name,_ in zones:
-                    if lo-1 <= p <= up+1:
-                        touched[name]=True
+    bot.send_message(m.chat.id,
+        "هلا بيك ببوت تبادل الناصرية 🔥\n\n"
+        "1️⃣ دوس 📤 نشر حسابي ودز يوزرك\n"
+        "2️⃣ دوس 📋 مهام المتابعة تابع 3 حسابات\n"
+        "3️⃣ حسابك ينتشر لـ 100 شخص حقيقي\n\n"
+        "بدون باسورد وآمن 100%", reply_markup=markup)
 
-                is_new = (slot!=last_3m) and (now.minute%3==0)
-                if is_new and last_3m!="":
-                    for up,lo,name,mid in zones:
-                        if touched.get(name):
-                            if old>=up and p<lo:
-                                send(f"🔻 بيع 3د {name} {up}-{lo} دخول {p:.2f}$")
-                            elif old<=lo and p>up:
-                                send(f"🚀 شراء 3د {name} {up}-{lo} دخول {p:.2f}$")
-                            touched[name]=False
-                    last_3m=slot
-                if last_3m=="": last_3m=slot
-        except: pass
-        time.sleep(10)
+@bot.message_handler(func=lambda m: m.text == "📤 نشر حسابي")
+def ask_user(m):
+    bot.send_message(m.chat.id, "دز يوزر الانستا مالتك، مثال:\n@ali_nasiriyah")
 
-threading.Thread(target=worker,daemon=True).start()
-@app.route("/")
-def home():
-    t=f"3د يومي | {last_price}$ | {last_error}<br>"
-    for up,lo,n,mid in zones: t+=f"{n}: {up},{lo} mid {mid}<br>"
-    return t
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=10000)
+@bot.message_handler(func=lambda m: m.text and m.text.startswith("@"))
+def save_user(m):
+    db = load_db()
+    uid = str(m.from_user.id)
+    username = m.text.strip()
+    db["users"][uid]["username"] = username
+    db["users"][uid]["points"] += 5
+    save_db(db)
+    bot.send_message(m.chat.id, f"✅ تم حفظ {username}\nعندك {db['users'][uid]['points']} نقاط\nهسه دوس 📋 مهام المتابعة حتى ينتشر حسابك اكثر")
+
+@bot.message_handler(func=lambda m: m.text == "⭐ نقاطي")
+def points(m):
+    db = load_db()
+    uid = str(m.from_user.id)
+    p = db["users"].get(uid, {}).get("points", 0)
+    bot.send_message(m.chat.id, f"⭐ نقاطك: {p}\nكل ما تتابع حساب تاخذ 2 نقطة\nنشر حسابك يكلف 10 نقاط")
+
+@bot.message_handler(func=lambda m: m.text == "📋 مهام المتابعة")
+def tasks(m):
+    db = load_db()
+    # نجيب 3 يوزرات عشوائية
+    users = [u for uid,u in db["users"].items() if u["username"] and uid!= str(m.from_user.id)]
+    if len(users) < 3:
+        bot.send_message(m.chat.id, "⏳ ماكو حسابات كافية حاليا، انتظر ناس جد
