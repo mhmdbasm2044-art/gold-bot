@@ -1,4 +1,6 @@
+openai
+gtts
+moviepy==1.0.3
+Pillow
 requests
-matplotlib
-flask
-websocket-client
+schedule
