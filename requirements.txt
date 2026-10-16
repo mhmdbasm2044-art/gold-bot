@@ -1,4 +1,4 @@
 requests
-websockets
 matplotlib
 flask
+websocket-client
