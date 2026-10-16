@@ -8,67 +8,75 @@ import matplotlib.pyplot as plt
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 app = Flask(__name__)
-candles = deque(maxlen=50)
 
-def send_chart_with_break(break_price, peak):
+# شموع لكل رمز
+data_store = {
+    "BOOM1000": deque(maxlen=50),
+    "CRASH1000": deque(maxlen=50)
+}
+
+def send_chart(symbol, break_price, peak, candles):
     try:
-        if len(candles) < 10: return
         fig, ax = plt.subplots(figsize=(8,4))
+        d = list(candles)[-30:]
+        opens = [c["open"] for c in d]
+        highs = [c["high"] for c in d]
+        lows = [c["low"] for c in d]
+        closes = [c["close"] for c in d]
 
-        # اخر 30 شمعة 1m
-        data = list(candles)[-30:]
-        opens = [c["open"] for c in data]
-        highs = [c["high"] for c in data]
-        lows = [c["low"] for c in data]
-        closes = [c["close"] for c in data]
-
-        for i in range(len(data)):
+        for i in range(len(d)):
             color = 'green' if closes[i] >= opens[i] else 'red'
             ax.plot([i, i], [lows[i], highs[i]], color='black', linewidth=1)
             ax.plot([i, i], [opens[i], closes[i]], color=color, linewidth=4)
-            # نقطة الكسر
-            if highs[i] == break_price:
-                ax.scatter(i, highs[i], color='blue', s=120, zorder=5)
+            if highs[i] == break_price and symbol == "BOOM1000":
+                ax.scatter(i, highs[i], color='blue', s=120)
+            if lows[i] == break_price and symbol == "CRASH1000":
+                ax.scatter(i, lows[i], color='blue', s=120)
 
-        ax.axhline(y=peak, color='red', linestyle='--', linewidth=1.2, label=f'قمة مكسورة {peak:.2f}')
+        if symbol == "BOOM1000":
+            ax.axhline(y=peak, color='red', linestyle='--', label=f'قمة {peak:.2f}')
+            title = f"{symbol} - 1m BREAK UP {peak:.2f}->{break_price:.2f}"
+            caption = f"📊 BOOM كسر قمة 1m\n💥 {peak:.2f} -> {break_price:.2f}\n⏱ {time.strftime('%H:%M:%S')}"
+        else:
+            ax.axhline(y=peak, color='red', linestyle='--', label=f'قاع {peak:.2f}')
+            title = f"{symbol} - 1m BREAK DOWN {peak:.2f}->{break_price:.2f}"
+            caption = f"📊 CRASH كسر قاع 1m\n🔻 {peak:.2f} -> {break_price:.2f}\n⏱ {time.strftime('%H:%M:%S')}"
 
-        ax.set_title(f"BOOM1000 - 1m BREAK - {peak:.2f} -> {break_price:.2f}")
+        ax.set_title(title)
         ax.legend()
         plt.tight_layout()
-
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
         plt.close()
         buf.seek(0)
 
-        caption = f"📊 كسر فريم 1 دقيقة\n💥 قمة: {peak:.2f}\n🔵 كسر: {break_price:.2f}\n🕯️ اخر اغلاق: {closes[-1]:.2f}\n⏱ {time.strftime('%H:%M:%S')}"
-
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
             data={"chat_id": CHAT_ID, "caption": caption},
-            files={'photo': ('break_1m.png', buf)}, timeout=15)
-        print("تم ارسال شارت الكسر")
+            files={'photo': (f'{symbol}.png', buf)}, timeout=15)
     except Exception as e:
-        print(f"Chart error: {e}")
+        print(f"Chart {symbol} error: {e}")
 
 def log(msg):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg}, timeout=5)
     except: pass
 
-async def run():
+async def handle_symbol(symbol):
     uri = "wss://ws.derivws.com/websockets/v3?app_id=1089"
     while True:
         try:
             async with websockets.connect(uri) as ws:
-                await ws.send(json.dumps({"ticks_history": "BOOM1000", "adjust_start_time": 1, "count": 50, "end": "latest", "start": 1, "style": "candles", "granularity": 60}))
-                print("طلبت تاريخ 1m...")
+                await ws.send(json.dumps({"ticks_history": symbol, "adjust_start_time": 1, "count": 50, "end": "latest", "start": 1, "style": "candles", "granularity": 60}))
+                print(f"طلبت تاريخ {symbol}")
                 async for raw in ws:
                     data = json.loads(raw)
+                    candles = data_store[symbol]
+
                     if "candles" in data:
                         candles.clear()
                         for c in data["candles"]:
                             candles.append({"high": float(c["high"]), "low": float(c["low"]), "open": float(c["open"]), "close": float(c["close"]), "start": c["epoch"]})
-                        log(f"✅ تم تحميل {len(candles)} شمعة 1m - بانتظار كسر مع شارت")
-                        await ws.send(json.dumps({"ticks_history": "BOOM1000", "style": "candles", "granularity": 60, "subscribe": 1}))
+                        log(f"✅ {symbol} تم تحميل {len(candles)} شمعة 1m")
+                        await ws.send(json.dumps({"ticks_history": symbol, "style": "candles", "granularity": 60, "subscribe": 1}))
 
                     if "ohlc" in data:
                         o = data["ohlc"]
@@ -79,19 +87,28 @@ async def run():
                             candles.append(c)
 
                         if len(candles) >= 21:
-                            peak = max([x["high"] for x in list(candles)[-21:-1]])
-                            if c["high"] > peak:
-                                print(f"BREAK 1m {peak} -> {c['high']}")
-                                # دز صورة + نص
-                                await asyncio.to_thread(send_chart_with_break, c["high"], peak)
-                                log(f"🔵 كسر قمة 1m\n💥 {peak:.2f} -> {c['high']:.2f}")
+                            if symbol == "BOOM1000":
+                                peak = max([x["high"] for x in list(candles)[-21:-1]])
+                                if c["high"] > peak:
+                                    await asyncio.to_thread(send_chart, symbol, c["high"], peak, candles)
+                            else: # CRASH1000 يكسر قاع
+                                trough = min([x["low"] for x in list(candles)[-21:-1]])
+                                if c["low"] < trough:
+                                    await asyncio.to_thread(send_chart, symbol, c["low"], trough, candles)
         except Exception as e:
-            print(f"Reconnect {e}")
+            print(f"{symbol} reconnect {e}")
             await asyncio.sleep(3)
 
-def start_ws(): asyncio.run(run())
+async def main_loop():
+    await asyncio.gather(handle_symbol("BOOM1000"), handle_symbol("CRASH1000"))
+
+def start_ws(): asyncio.run(main_loop())
+
 @app.route('/')
-def home(): return f"OK - {len(candles)} candles"
+def home():
+    b = len(data_store["BOOM1000"])
+    cr = len(data_store["CRASH1000"])
+    return f"OK - BOOM:{b} CRASH:{cr}"
 
 if __name__ == "__main__":
     threading.Thread(target=start_ws, daemon=True).start()
